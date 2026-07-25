@@ -19,6 +19,7 @@ class TestFeedbackRequest(BaseModel):
 
 class TestFeedbackResponse(BaseModel):
     feedback: str
+    recommended_books: Optional[List[str]] = []
 
 class UserLogin(BaseModel):
     email: EmailStr

@@ -134,6 +134,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [userAnswers, setUserAnswers] = useState<{ [key: number]: number }>({});
   const [testScore, setTestScore] = useState<number>(0);
   const [testFeedback, setTestFeedback] = useState<string>('');
+  const [recommendedBooks, setRecommendedBooks] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Calendar State
@@ -352,10 +353,11 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         setGenerationResult(result);
         if (result.questions && result.questions.length > 0) {
            setTestQuestions(result.questions);
-           setTestState('taking');
-           setUserAnswers({});
-           setTestScore(0);
-           setTestFeedback('');
+            setTestState('taking');
+            setUserAnswers({});
+            setTestScore(0);
+            setTestFeedback('');
+            setRecommendedBooks([]);
         }
       }
     } catch (error) {
@@ -403,6 +405,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
       if (response.ok) {
         const data = await response.json();
         setTestFeedback(data.feedback);
+        setRecommendedBooks(data.recommended_books || []);
       }
     } catch (error) {
       console.error('Error submitting test:', error);
@@ -1034,9 +1037,25 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                   </div>
                   
                   {testState === 'completed' && testFeedback && (
-                    <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg">
+                    <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg shadow-xs">
                       <h3 className="font-bold text-cyan-800 mb-2">AI Feedback</h3>
-                      <p className="text-cyan-900">{testFeedback}</p>
+                      <p className="text-cyan-900 leading-relaxed">{testFeedback}</p>
+
+                      {recommendedBooks && recommendedBooks.length > 0 && (
+                        <div className="mt-4 pt-3 border-t border-cyan-200/80">
+                          <h4 className="font-bold text-cyan-900 text-sm mb-2 flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4 text-cyan-700" />
+                            Recommended Books
+                          </h4>
+                          <ul className="list-disc list-inside space-y-1.5 text-sm text-cyan-900 font-medium">
+                            {recommendedBooks.map((book, idx) => (
+                              <li key={idx} className="pl-1">
+                                {book}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
                     </div>
                   )}
 

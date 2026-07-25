@@ -195,6 +195,7 @@ class TestFeedbackRequest(BaseModel):
 
 class TestFeedbackResponse(BaseModel):
     feedback: str
+    recommended_books: Optional[List[str]] = []
 
 @api_router.post("/test-feedback", response_model=TestFeedbackResponse)
 async def generate_test_feedback(
@@ -203,29 +204,83 @@ async def generate_test_feedback(
 ):
     try:
         from openai import OpenAI
-        import os
+        import os, json
         api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
         client = OpenAI(api_key=api_key)
         
-        prompt = f"The user just took a {request.exam_name} mock test. They scored {request.score} out of {request.total} (each question +4 for correct, -1 for incorrect, 0 for skipped).\n\n"
-        prompt += "Here are the questions they faced and how they answered:\n"
-        for i, q in enumerate(request.results):
-            prompt += f"Q{i+1}: {q.get('question')}\n"
-            prompt += f"User's Answer Index: {q.get('user_answer')}, Correct Answer Index: {q.get('correct_answer')}\n"
-            prompt += f"Solution: {q.get('solution')}\n\n"
-            
-        prompt += "Based on this, give a short, encouraging, and highly specific paragraph of feedback for the student. Highlight which topics they got wrong and what they should focus on."
-        
-        response = client.chat.completions.create(
-            model=os.getenv("OPENAI_MODEL", "gpt-4-turbo"),
-            messages=[
-                {"role": "system", "content": "You are an expert AI tutor and mentor."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        return TestFeedbackResponse(feedback=response.choices[0].message.content)
+        # Check if user got all questions correct
+        all_correct = True
+        if request.score < request.total:
+            all_correct = False
+        else:
+            for q in request.results:
+                if q.get('user_answer') != q.get('correct_answer'):
+                    all_correct = False
+                    break
+
+        if all_correct:
+            system_prompt = "You are an expert AI tutor and academic mentor for competitive exams."
+            prompt = (
+                f"The student just completed a {request.exam_name} mock test and scored PERFECT {request.score} out of {request.total}!\n"
+                "Generate a short, warm, highly congratulatory and encouraging paragraph praising their perfect score and mastery.\n"
+                "CRITICAL: Do NOT recommend any books, study materials, or areas for improvement in this case."
+            )
+            response = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4-turbo"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=400
+            )
+            feedback_text = response.choices[0].message.content.strip()
+            return TestFeedbackResponse(feedback=feedback_text, recommended_books=[])
+
+        else:
+            system_prompt = (
+                "You are an expert AI tutor for competitive exams like JEE. "
+                "You must respond in strict JSON format matching:\n"
+                "{\n"
+                '  "feedback": "Encouraging feedback paragraph...",\n'
+                '  "recommended_books": ["Author - Book Title", "Author - Book Title"]\n'
+                "}"
+            )
+            prompt = f"The student took a {request.exam_name} mock test. Score: {request.score} out of {request.total}.\n\n"
+            prompt += "Questions and student answers:\n"
+            for i, q in enumerate(request.results):
+                prompt += f"Q{i+1}: {q.get('question')}\n"
+                prompt += f"User Answer: {q.get('user_answer')}, Correct Answer: {q.get('correct_answer')}\n"
+                prompt += f"Solution: {q.get('solution')}\n\n"
+
+            prompt += (
+                "Instructions:\n"
+                "1. Provide a short, encouraging, and highly specific paragraph of feedback ('feedback'). Praise what they answered correctly and point out the specific weak topics/concepts they got wrong.\n"
+                "2. Recommend 2-3 real, widely-known, standard reference books ('recommended_books') commonly used by JEE / competitive exam students for the identified weak topics.\n"
+                "   - Rely on your own knowledge of genuinely famous standard reference books for JEE (e.g. 'H.C. Verma - Concepts of Physics', 'O.P. Tandon - Physical Chemistry', 'R.D. Sharma - Mathematics for JEE').\n"
+                "   - Do NOT recommend obscure, regional, or invented titles.\n"
+                "   - Format each entry strictly as 'Author - Book Title' or 'Book Title by Author' (e.g. 'H.C. Verma - Concepts of Physics').\n"
+                "   - Do NOT include chapter numbers, page numbers, links, URLs, or other resource types.\n"
+                "3. Output strictly valid JSON."
+            )
+
+            response = client.chat.completions.create(
+                model=os.getenv("OPENAI_MODEL", "gpt-4-turbo"),
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.7,
+                max_tokens=600
+            )
+
+            res_data = json.loads(response.choices[0].message.content)
+            feedback_text = res_data.get("feedback", "")
+            books = res_data.get("recommended_books", [])
+
+            return TestFeedbackResponse(feedback=feedback_text, recommended_books=books)
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
