@@ -1,4 +1,10 @@
 # backend/main.py
+import sys
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
+if hasattr(sys.stderr, 'reconfigure'):
+    sys.stderr.reconfigure(encoding='utf-8')
+
 from fastapi import FastAPI, Depends, HTTPException, status, UploadFile, File, Form, APIRouter
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -9,8 +15,7 @@ from schemas import (
     UserCreate, UserLogin, UserResponse,
     OnboardingCreate, OnboardingResponse, OnboardingUpdate,
     StudyPlanCreateRequest, StudyPlanOut, DailyTaskOut,
-    TaskUpdateRequest, RegeneratePlanRequest, SubjectProgressOut,
-    GoogleLoginRequest
+    TaskUpdateRequest, RegeneratePlanRequest, SubjectProgressOut
 )
 from crud import (
     get_user_by_email, create_user, get_user_by_id,
@@ -51,12 +56,13 @@ class QuestionGenerationRequest(BaseModel):
     output_format: str = 'pdf'
     questions_per_chunk: int
     syllabus_id: int 
-    subjects: Optional[List[str]] = None
+    topics: Optional[List[str]] = None
 
 class QuestionGenerationResponse(BaseModel):
     success: bool
     message: str
     files: Optional[Dict[str, str]] = None
+    questions: Optional[List[dict]] = None
 
 class QuestionType(BaseModel):
     name: str
@@ -100,6 +106,14 @@ async def get_syllabus_subjects():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading syllabus file: {str(e)}")
 
+@api_router.get("/syllabus-all-topics", response_model=List[str])
+async def get_syllabus_all_topics():
+    from utils.syllabus_parser import get_all_topics
+    try:
+        return get_all_topics()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading syllabus file: {str(e)}")
+
 @api_router.get("/question-types", response_model=List[QuestionType])
 async def get_question_types():
     descriptions = {
@@ -137,12 +151,12 @@ async def generate_questions(
         parsed_syllabus = parse_syllabus_weightage()
         
         final_topics = {}
-        if request.subjects and parsed_syllabus:
-            for subj in request.subjects:
-                if subj in parsed_syllabus:
-                    final_topics[subj] = [t["topic"] for t in parsed_syllabus[subj]]
+        if request.topics:
+            # Group the requested topics by subject if possible, or just put them under "Selected"
+            # We'll just put them under a single key to make it simple, Generation.py will shuffle them.
+            final_topics = {"Selected": request.topics}
         
-        # Fallback to DB syllabus topics if no subjects selected or Excel failed
+        # Fallback to DB syllabus topics if no topics selected
         if not final_topics:
             final_topics = {"General": syllabus.topics}
 
@@ -162,6 +176,48 @@ async def generate_questions(
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"An unexpected error occurred: {str(e)}")
+
+class TestFeedbackRequest(BaseModel):
+    score: int
+    total: int
+    exam_name: str
+    results: List[dict]
+
+class TestFeedbackResponse(BaseModel):
+    feedback: str
+
+@api_router.post("/test-feedback", response_model=TestFeedbackResponse)
+async def generate_test_feedback(
+    request: TestFeedbackRequest,
+    current_user: dict = Depends(get_current_user_from_token)
+):
+    try:
+        from openai import OpenAI
+        import os
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+        client = OpenAI(api_key=api_key)
+        
+        prompt = f"The user just took a {request.exam_name} mock test. They scored {request.score} out of {request.total} (each question +4 for correct, -1 for incorrect, 0 for skipped).\n\n"
+        prompt += "Here are the questions they faced and how they answered:\n"
+        for i, q in enumerate(request.results):
+            prompt += f"Q{i+1}: {q.get('question')}\n"
+            prompt += f"User's Answer Index: {q.get('user_answer')}, Correct Answer Index: {q.get('correct_answer')}\n"
+            prompt += f"Solution: {q.get('solution')}\n\n"
+            
+        prompt += "Based on this, give a short, encouraging, and highly specific paragraph of feedback for the student. Highlight which topics they got wrong and what they should focus on."
+        
+        response = client.chat.completions.create(
+            model=os.getenv("OPENAI_MODEL", "gpt-4-turbo"),
+            messages=[
+                {"role": "system", "content": "You are an expert AI tutor and mentor."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return TestFeedbackResponse(feedback=response.choices[0].message.content)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @api_router.get("/wakeup")
 async def wakeup():
@@ -249,49 +305,10 @@ def login(user: UserLogin, db: Session = Depends(get_db)):
     return {
         "access_token": access_token, 
         "token_type": "bearer", 
-        "user": UserResponse(id=db_user.id, email=db_user.email, has_completed_onboarding=db_user.has_completed_onboarding)
-    }
-
-@api_router.post("/auth/google")
-def google_login(payload: GoogleLoginRequest, db: Session = Depends(get_db)):
-    from google.oauth2 import id_token
-    from google.auth.transport import requests as google_requests
-    import os
-    import secrets
-    from auth import hash_password, create_access_token
-    
-    CLIENT_ID = os.getenv("VITE_GOOGLE_CLIENT_ID")
-    if not CLIENT_ID:
-        raise HTTPException(status_code=500, detail="Google Client ID is not configured on the server.")
-        
-    try:
-        # Verify the token
-        idinfo = id_token.verify_oauth2_token(
-            payload.credential, 
-            google_requests.Request(), 
-            CLIENT_ID
-        )
-        
-        email = idinfo.get('email')
-        if not email:
-            raise HTTPException(status_code=400, detail="Google token did not contain an email address.")
-            
-        # Check if user exists
-        db_user = get_user_by_email(db, email)
-        if not db_user:
-            # Create a new user with a random hashed password since they use Google
-            random_pwd = secrets.token_urlsafe(32)
-            user_create = UserCreate(email=email, password=random_pwd)
-            db_user = create_user(db, user_create)
-            
-        access_token = create_access_token(data={"sub": db_user.email, "user_id": db_user.id})
-        return {
-            "access_token": access_token, 
-            "token_type": "bearer", 
-            "user": UserResponse(id=db_user.id, email=db_user.email, has_completed_onboarding=db_user.has_completed_onboarding)
+        "user": {
+            "id": db_user.id, "email": db_user.email, "has_completed_onboarding": db_user.has_completed_onboarding
         }
-    except ValueError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid Google token: {str(e)}")
+    }
 
 @api_router.get("/me", response_model=UserResponse)
 def get_current_user(current_user: dict = Depends(get_current_user_from_token), db: Session = Depends(get_db)):

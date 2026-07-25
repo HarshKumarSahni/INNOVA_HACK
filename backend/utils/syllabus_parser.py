@@ -59,3 +59,12 @@ def get_available_subjects(file_path: str = None) -> list:
     """Returns a list of available subjects from the excel file."""
     syllabus = parse_syllabus_weightage(file_path)
     return list(syllabus.keys())
+
+def get_all_topics(file_path: str = None) -> list:
+    """Returns a flat list of all topic names from the excel file."""
+    syllabus = parse_syllabus_weightage(file_path)
+    topics = []
+    for subj_topics in syllabus.values():
+        for t in subj_topics:
+            topics.append(t["topic"])
+    return topics

@@ -112,30 +112,10 @@ const App: React.FC = () => {
   };
 
   // Handle successful signup
-  const handleSignup = (userData: { id: number; email: string; token?: string; hasCompletedOnboarding?: boolean }) => {
-    // If signup came with a token (e.g., Google OAuth), log the user in directly
-    if (userData.token) {
-      const newUser: User = {
-        id: userData.id,
-        email: userData.email,
-        token: userData.token,
-        hasCompletedOnboarding: userData.hasCompletedOnboarding ?? false
-      };
-      localStorage.setItem('access_token', userData.token);
-      localStorage.setItem('user_data', JSON.stringify({
-        id: userData.id,
-        email: userData.email,
-        hasCompletedOnboarding: userData.hasCompletedOnboarding ?? false
-      }));
-      setUser(newUser);
-      if (!userData.hasCompletedOnboarding) {
-        setShowOnboarding(true);
-      }
-    } else {
-      // Standard email/password signup — just go to login page
-      console.log('User account created:', userData);
-      setShowSignup(false);
-    }
+  const handleSignup = (userData: { id: number; email: string }) => {
+    console.log('User account created:', userData);
+    // After successful signup, switch to login page
+    setShowSignup(false);
   };
 
   // Handle onboarding completion

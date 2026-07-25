@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
 import { Eye, EyeOff, BookOpen, Target, TrendingUp } from 'lucide-react';
-import { GoogleLogin } from '@react-oauth/google';
 import { API_BASE_URL } from '../config';
 
 interface SignupPageProps {
-  onSignup: (userData: { id: number; email: string; token: string; hasCompletedOnboarding: boolean }) => void;
+  onSignup: (userData: { id: number; email: string }) => void;
   onSwitchToLogin: () => void;
 }
 
@@ -224,41 +223,6 @@ const SignupPage: React.FC<SignupPageProps> = ({ onSignup, onSwitchToLogin }) =>
               <div className="relative flex justify-center text-sm">
                 <span className="px-4 bg-white text-gray-500 font-medium">OR</span>
               </div>
-            </div>
-
-            {/* Google Login */}
-            <div className="flex justify-center w-full">
-              <GoogleLogin
-                onSuccess={async (credentialResponse) => {
-                  try {
-                    setLoading(true);
-                    setError('');
-                    const res = await fetch(`${API_BASE_URL}/api/auth/google`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ credential: credentialResponse.credential }),
-                    });
-                    const data = await res.json();
-                    if (!res.ok) throw new Error(data.detail || 'Google Signup failed');
-                    
-                    localStorage.setItem('access_token', data.access_token);
-                    onSignup({
-                      id: data.user.id,
-                      email: data.user.email,
-                      token: data.access_token,
-                      hasCompletedOnboarding: data.user.has_completed_onboarding ?? false
-                    });
-                  } catch (err) {
-                    setError(err instanceof Error ? err.message : 'Google Signup failed');
-                  } finally {
-                    setLoading(false);
-                  }
-                }}
-                onError={() => {
-                  setError('Google Signup Failed');
-                }}
-                useOneTap
-              />
             </div>
 
             {/* Login Link */}

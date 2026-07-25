@@ -7,12 +7,22 @@ class UserCreate(BaseModel):
     email: EmailStr
     password: str
 
+class QuestionType(BaseModel):
+    name: str
+    description: str
+
+class TestFeedbackRequest(BaseModel):
+    score: int
+    total: int
+    exam_name: str
+    results: List[dict]
+
+class TestFeedbackResponse(BaseModel):
+    feedback: str
+
 class UserLogin(BaseModel):
     email: EmailStr
     password: str
-
-class GoogleLoginRequest(BaseModel):
-    credential: str
 
 class UserResponse(BaseModel):
     id: int

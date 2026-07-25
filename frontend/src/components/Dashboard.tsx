@@ -124,9 +124,17 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
   const [selectedSyllabusId, setSelectedSyllabusId] = useState<number | null>(null);
   const [isSyllabusLoading, setIsSyllabusLoading] = useState(true);
 
-  // --- NEW: Syllabus subjects state ---
-  const [availableSubjects, setAvailableSubjects] = useState<string[]>([]);
-  const [selectedSubjects, setSelectedSubjects] = useState<string[]>([]);
+  // --- NEW: Syllabus topics state ---
+  const [availableTopics, setAvailableTopics] = useState<string[]>([]);
+  const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+
+  // --- NEW: Interactive Mock Test State ---
+  const [testQuestions, setTestQuestions] = useState<any[]>([]);
+  const [testState, setTestState] = useState<'idle' | 'taking' | 'completed'>('idle');
+  const [userAnswers, setUserAnswers] = useState<{ [key: number]: number }>({});
+  const [testScore, setTestScore] = useState<number>(0);
+  const [testFeedback, setTestFeedback] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Calendar State
   const [currentDate, setCurrentDate] = useState(new Date());
@@ -136,21 +144,21 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
     loadQuestionTypes();
     loadOnboardingData();
     fetchSyllabuses(); // <-- Load syllabuses on init
-    fetchSyllabusSubjects();
+    fetchSyllabusTopics();
   }, []);
 
-  const fetchSyllabusSubjects = async () => {
+  const fetchSyllabusTopics = async () => {
     try {
       const token = localStorage.getItem('access_token');
-      const response = await fetch(`${API_BASE_URL}/api/syllabus-subjects`, {
+      const response = await fetch(`${API_BASE_URL}/api/syllabus-all-topics`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       if (response.ok) {
-        const subjects = await response.json();
-        setAvailableSubjects(subjects);
+        const topics = await response.json();
+        setAvailableTopics(topics);
       }
     } catch (error) {
-      console.error('Error fetching syllabus subjects:', error);
+      console.error('Error fetching syllabus topics:', error);
     }
   };
 
@@ -251,15 +259,19 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
       return;
     }
 
-    const totalQuestions = Object.values(questionPlan).reduce((sum, count) => sum + count, 0);
-    if (totalQuestions === 0) {
-      setGenerationResult({ success: false, message: 'Please select at least one question type.' });
+    if (selectedTopics.length === 0) {
+      setGenerationResult({ success: false, message: 'Please select at least one topic.' });
       return;
     }
 
-    const invalidCounts = Object.entries(questionPlan).filter(([_, count]) => count > 0 && count % numQuestionsChunk !== 0);
-    if (invalidCounts.length > 0) {
-      setGenerationResult({ success: false, message: `All question counts must be multiples of ${numQuestionsChunk}.` });
+    const totalQuestions = Object.values(questionPlan).reduce((sum, count) => sum + count, 0);
+    if (totalQuestions < 3 || totalQuestions > 15) {
+      setGenerationResult({ success: false, message: 'Please request between 3 and 15 questions in total.' });
+      return;
+    }
+
+    if (totalQuestions < selectedTopics.length) {
+      setGenerationResult({ success: false, message: `Please request at least as many questions (${totalQuestions}) as topics selected (${selectedTopics.length}).` });
       return;
     }
 
@@ -277,7 +289,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         output_format: outputFormat,
         questions_per_chunk: numQuestionsChunk,
         syllabus_id: selectedSyllabusId, // <-- PASS THE ID
-        subjects: selectedSubjects.length > 0 ? selectedSubjects : undefined
+        topics: selectedTopics.length > 0 ? selectedTopics : undefined
       };
 
       const response = await fetch(`${API_BASE_URL}/api/generate-questions`, {
@@ -298,11 +310,64 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
         setGenerationResult({ success: false, message: result.detail || 'An unknown server error occurred.' });
       } else {
         setGenerationResult(result);
+        if (result.questions && result.questions.length > 0) {
+           setTestQuestions(result.questions);
+           setTestState('taking');
+           setUserAnswers({});
+           setTestScore(0);
+           setTestFeedback('');
+        }
       }
     } catch (error) {
       setGenerationResult({ success: false, message: `An unexpected error occurred: ${error}` });
     } finally {
       setIsGenerating(false);
+    }
+  };
+
+  const submitTest = async () => {
+    setIsSubmitting(true);
+    try {
+      const token = localStorage.getItem('access_token');
+      const examName = onboardingData?.examName || 'General Exam';
+      
+      let calculatedScore = 0;
+      let totalQuestions = testQuestions.length;
+      
+      const results = testQuestions.map((q, index) => {
+        const userAnswer = userAnswers[index] || 0; // 0 if skipped
+        const isCorrect = userAnswer === q.correct_answer;
+        
+        if (userAnswer !== 0) {
+            if (isCorrect) calculatedScore += 4;
+            else calculatedScore -= 1;
+        }
+
+        return {
+          question: q.question,
+          user_answer: userAnswer,
+          correct_answer: q.correct_answer,
+          solution: q.solution
+        };
+      });
+      
+      setTestScore(calculatedScore);
+      setTestState('completed');
+
+      const response = await fetch(`${API_BASE_URL}/api/test-feedback`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({ score: calculatedScore, total: totalQuestions * 4, exam_name: examName, results })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTestFeedback(data.feedback);
+      }
+    } catch (error) {
+      console.error('Error submitting test:', error);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -539,7 +604,7 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
           /* --- Dashboard View --- */
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
             <div className="lg:col-span-2 space-y-8">
-              {activeTab === 'mockTest' && (
+              {activeTab === 'mockTest' && testState === 'idle' && (
                 <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100">
                   <div className="flex items-center gap-4 mb-4">
                     <FileText className="w-8 h-8 text-cyan-600" />
@@ -578,32 +643,35 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                     )}
                   </div>
 
-                  {/* --- NEW: Subject Selector --- */}
-                  {availableSubjects.length > 0 && (
+                  {/* --- NEW: Topic Selector --- */}
+                  {availableTopics.length > 0 && (
                     <div className="my-6">
                       <label className="block text-sm font-medium text-gray-700 mb-2">
-                        Filter by Subjects (Optional)
+                        Select Topics (1 to 15 max)
                       </label>
-                      <div className="flex flex-wrap gap-3">
-                        {availableSubjects.map((subj) => (
-                          <label key={subj} className="flex items-center gap-2 px-3 py-2 border rounded-lg cursor-pointer hover:bg-gray-50">
+                      <div className="max-h-60 overflow-y-auto border rounded-lg p-3 bg-white grid grid-cols-1 md:grid-cols-2 gap-2">
+                        {availableTopics.map((topic) => (
+                          <label key={topic} className="flex items-center gap-2 px-2 py-1 hover:bg-gray-50 rounded">
                             <input 
                               type="checkbox" 
-                              checked={selectedSubjects.includes(subj)}
+                              checked={selectedTopics.includes(topic)}
+                              disabled={!selectedTopics.includes(topic) && selectedTopics.length >= 15}
                               onChange={(e) => {
                                 if (e.target.checked) {
-                                  setSelectedSubjects([...selectedSubjects, subj]);
+                                  if (selectedTopics.length < 15) {
+                                    setSelectedTopics([...selectedTopics, topic]);
+                                  }
                                 } else {
-                                  setSelectedSubjects(selectedSubjects.filter(s => s !== subj));
+                                  setSelectedTopics(selectedTopics.filter(t => t !== topic));
                                 }
                               }}
-                              className="w-4 h-4 text-cyan-600 rounded"
+                              className="w-4 h-4 text-cyan-600 rounded border-gray-300"
                             />
-                            <span className="text-sm font-medium text-gray-800">{subj}</span>
+                            <span className="text-sm text-gray-800 break-words">{topic}</span>
                           </label>
                         ))}
                       </div>
-                      <p className="text-xs text-gray-500 mt-2">If none selected, it uses all subjects in your syllabus.</p>
+                      <p className="text-xs text-gray-500 mt-2">Selected {selectedTopics.length} / 15 topics.</p>
                     </div>
                   )}
 
@@ -689,6 +757,102 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                       {isGenerating ? <><Loader2 className="w-6 h-6 animate-spin" /> Generating...</> : <><Plus className="w-6 h-6" /> Generate Test</>}
                     </button>
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'mockTest' && testState !== 'idle' && (
+                <div className="bg-white rounded-2xl shadow-xl p-6 border border-gray-100">
+                  <div className="flex items-center justify-between mb-6">
+                    <h2 className="text-2xl font-bold text-gray-800">Mock Test</h2>
+                    {testState === 'completed' && (
+                      <span className="px-4 py-1.5 bg-green-100 text-green-800 font-bold rounded-full">
+                        Score: {testScore} / {testQuestions.length * 4}
+                      </span>
+                    )}
+                  </div>
+                  
+                  {testState === 'completed' && testFeedback && (
+                    <div className="mb-6 p-4 bg-cyan-50 border border-cyan-200 rounded-lg">
+                      <h3 className="font-bold text-cyan-800 mb-2">AI Feedback</h3>
+                      <p className="text-cyan-900">{testFeedback}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-8">
+                    {testQuestions.map((q, qIndex) => (
+                      <div key={qIndex} className="p-4 border rounded-lg">
+                        <p className="font-semibold text-lg mb-4">Q{qIndex + 1}. {q.question}</p>
+                        <div className="space-y-2">
+                          {q.options.map((opt: string, optIndex: number) => {
+                            const optionNumber = optIndex + 1;
+                            let buttonClass = "w-full text-left px-4 py-3 rounded-lg border hover:bg-gray-50 transition-colors";
+                            
+                            if (testState === 'completed') {
+                              if (optionNumber === q.correct_answer) {
+                                buttonClass = "w-full text-left px-4 py-3 rounded-lg border bg-green-100 border-green-400 font-bold";
+                              } else if (userAnswers[qIndex] === optionNumber) {
+                                buttonClass = "w-full text-left px-4 py-3 rounded-lg border bg-red-100 border-red-400 line-through";
+                              }
+                            } else {
+                              if (userAnswers[qIndex] === optionNumber) {
+                                buttonClass = "w-full text-left px-4 py-3 rounded-lg border bg-cyan-100 border-cyan-400 font-bold";
+                              }
+                            }
+
+                            return (
+                              <button
+                                key={optIndex}
+                                onClick={() => {
+                                  if (testState === 'taking') {
+                                    setUserAnswers(prev => ({ ...prev, [qIndex]: optionNumber }));
+                                  }
+                                }}
+                                disabled={testState === 'completed'}
+                                className={buttonClass}
+                              >
+                                <span className="mr-2 font-bold">{String.fromCharCode(65 + optIndex)}.</span>
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {testState === 'completed' && q.solution && (
+                          <div className="mt-4 p-3 bg-gray-50 rounded text-sm text-gray-700">
+                            <strong>Solution:</strong> {q.solution}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+
+                  {testState === 'taking' && (
+                    <div className="mt-8 pt-6 border-t flex gap-4">
+                      <button 
+                        onClick={() => setTestState('idle')}
+                        className="flex-1 py-3 border border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-50"
+                      >
+                        Cancel Test
+                      </button>
+                      <button 
+                        onClick={submitTest}
+                        disabled={isSubmitting}
+                        className="flex-1 py-3 bg-gradient-to-r from-cyan-500 to-cyan-600 text-white rounded-lg font-semibold disabled:opacity-50"
+                      >
+                        {isSubmitting ? "Submitting..." : "Submit Test"}
+                      </button>
+                    </div>
+                  )}
+
+                  {testState === 'completed' && (
+                    <div className="mt-8 pt-6 border-t">
+                      <button 
+                        onClick={() => setTestState('idle')}
+                        className="w-full py-3 bg-gradient-to-r from-purple-500 to-purple-600 text-white rounded-lg font-semibold hover:bg-purple-700"
+                      >
+                        Take Another Test
+                      </button>
+                    </div>
+                  )}
                 </div>
               )}
 
