@@ -16,6 +16,12 @@ export interface DailyTask {
   completed_at: string | null;
 }
 
+export interface ExcludedTopic {
+  subject: string;
+  topic: string;
+  reason: string;
+}
+
 export interface StudyPlan {
   id: number;
   exam_name: string;
@@ -23,11 +29,16 @@ export interface StudyPlan {
   daily_available_hours: number;
   status: PlanStatus;
   tasks: DailyTask[];
+  excluded_topics?: ExcludedTopic[];
 }
 
 export interface StudyPlanCreateRequest {
+  exam_name: string;
+  topics_already_done?: string[];
+  exam_date: string; // ISO date string "YYYY-MM-DD"
   daily_available_hours: number;
-  weak_subjects: string[];
+  days_per_week_available: number;
+  weak_subjects?: string[];
 }
 
 export interface TaskUpdateRequest {

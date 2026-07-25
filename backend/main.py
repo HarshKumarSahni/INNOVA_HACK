@@ -51,7 +51,6 @@ app = FastAPI(title="AceTrack API", version="1.0.0")
 # --- Pydantic Models for Mock Test Generator ---
 class QuestionGenerationRequest(BaseModel):
     question_plan: Dict[str, int]
-    testing_mode: bool = False
     exam_name: str
     output_format: str = 'pdf'
     questions_per_chunk: int
@@ -114,6 +113,18 @@ async def get_syllabus_all_topics():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error reading syllabus file: {str(e)}")
 
+@api_router.get("/syllabus-topics-by-subject", response_model=Dict[str, List[str]])
+async def get_syllabus_topics_by_subject():
+    from utils.syllabus_parser import parse_syllabus_weightage
+    try:
+        parsed = parse_syllabus_weightage()
+        result = {}
+        for subject, topics in parsed.items():
+            result[subject] = [t["topic"] for t in topics]
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error reading syllabus file: {str(e)}")
+
 @api_router.get("/question-types", response_model=List[QuestionType])
 async def get_question_types():
     descriptions = {
@@ -162,7 +173,6 @@ async def generate_questions(
 
         result = run_generation_task(
             plan=request.question_plan,
-            testing_mode=request.testing_mode,
             exam_name=request.exam_name,
             output_format=request.output_format,
             questions_per_chunk=request.questions_per_chunk,
@@ -355,14 +365,16 @@ def check_onboarding_status(current_user: dict = Depends(get_current_user_from_t
 # === STUDY PLANNER API ENDPOINTS ===
 # ===============================================================
 
-def _plan_to_out(plan) -> StudyPlanOut:
+def _plan_to_out(plan, excluded_topics=None) -> StudyPlanOut:
     """Helper to serialize StudyPlan ORM object to StudyPlanOut schema."""
+    final_excluded = excluded_topics if excluded_topics is not None else (getattr(plan, 'excluded_topics', []) or [])
     return StudyPlanOut(
         id=plan.id,
         exam_name=plan.exam_name,
         target_exam_date=plan.target_exam_date,
         daily_available_hours=plan.daily_available_hours,
         status=plan.status,
+        excluded_topics=final_excluded,
         tasks=[
             DailyTaskOut(
                 id=t.id,
@@ -396,24 +408,14 @@ def generate_study_plan(
             detail="An active study plan already exists. Use /study-plan/regenerate to update it."
         )
 
-    # Fetch onboarding for exam date + exam name
-    onboarding = get_onboarding_data_by_user_id(db, user_id)
-    if not onboarding:
-        raise HTTPException(status_code=422, detail="Complete onboarding first to set your exam date.")
-
     from datetime import date as today_type
     today = today_type.today()
-    days_remaining = (onboarding.exam_date - today).days
+    days_remaining = (request.exam_date - today).days
 
     if days_remaining <= 0:
-        raise HTTPException(status_code=422, detail="Exam date has already passed. Please update your exam date in onboarding.")
+        raise HTTPException(status_code=422, detail="Exam date must be in the future.")
 
-    # Fetch syllabuses and flatten into topic dicts
-    syllabuses = get_syllabuses_by_user_id(db, user_id)
-    if not syllabuses:
-        raise HTTPException(status_code=422, detail="Upload at least one syllabus file before generating a study plan.")
-
-    # Build flat topic list from all syllabuses (each topic string = subject+topic)
+    # Fetch parsed syllabus with weightages
     from utils.syllabus_parser import parse_syllabus_weightage
     parsed_syllabus = parse_syllabus_weightage()
     
@@ -427,35 +429,40 @@ def generate_study_plan(
                     "weightage": float(t.get("weightage", 1.0))
                 })
     else:
-        for syl in syllabuses:
-            for i, topic_str in enumerate(syl.topics):
-                parts = topic_str.split(":", 1)
-                subject = parts[0].strip() if len(parts) == 2 else syl.name
-                topic = parts[1].strip() if len(parts) == 2 else topic_str.strip()
-                topic_list.append({"subject": subject, "topic": topic, "weightage": 1.0})
+        syllabuses = get_syllabuses_by_user_id(db, user_id)
+        if syllabuses:
+            for syl in syllabuses:
+                for i, topic_str in enumerate(syl.topics):
+                    parts = topic_str.split(":", 1)
+                    subject = parts[0].strip() if len(parts) == 2 else syl.name
+                    topic = parts[1].strip() if len(parts) == 2 else topic_str.strip()
+                    topic_list.append({"subject": subject, "topic": topic, "weightage": 1.0})
 
     if not topic_list:
-        raise HTTPException(status_code=422, detail="No topics found in your syllabus files.")
+        raise HTTPException(status_code=422, detail="No syllabus topics available for planning.")
 
-    # Compute hour budget
+    # Compute hour budget & feasibility check
     try:
         budget_result = compute_hour_budget(
             syllabus_topics=topic_list,
+            topics_already_done=request.topics_already_done or [],
             weak_subjects=request.weak_subjects or [],
             daily_hours=request.daily_available_hours,
             days_remaining=days_remaining,
+            days_per_week=request.days_per_week_available or 7
         )
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
     hour_budget = budget_result["budget"]
+    excluded_topics = budget_result.get("excluded_topics", [])
 
     # Call LLM for sequencing
     try:
         raw_days = _generate_schedule_from_llm(
             hour_budget=hour_budget,
             start_date=today,
-            target_exam_date=onboarding.exam_date,
+            target_exam_date=request.exam_date,
             days_remaining=days_remaining,
             daily_available_hours=request.daily_available_hours,
         )
@@ -469,9 +476,10 @@ def generate_study_plan(
     plan = create_study_plan(
         db=db,
         user_id=user_id,
-        exam_name=onboarding.exam_name,
-        target_exam_date=onboarding.exam_date,
+        exam_name=request.exam_name or "JEE",
+        target_exam_date=request.exam_date,
         daily_available_hours=request.daily_available_hours,
+        excluded_topics=excluded_topics,
     )
 
     # Flatten tasks for bulk insert
@@ -494,10 +502,9 @@ def generate_study_plan(
 
     bulk_create_tasks(db, plan.id, flat_tasks)
 
-    # Subject progress is no longer initialized here; it's handled on task completion.
     # Reload plan with tasks
     plan = get_plan_by_id(db, plan.id, user_id)
-    return _plan_to_out(plan)
+    return _plan_to_out(plan, excluded_topics=excluded_topics)
 
 
 @api_router.get("/study-plan/active", response_model=StudyPlanOut)

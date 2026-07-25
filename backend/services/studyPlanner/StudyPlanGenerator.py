@@ -18,96 +18,106 @@ MODEL = os.getenv("OPENAI_MODEL", "gpt-4o")
 
 def compute_hour_budget(
     syllabus_topics: List[Dict],   # List of {"subject": str, "topic": str, "weightage": float}
+    topics_already_done: List[str],
     weak_subjects: List[str],
     daily_hours: float,
     days_remaining: int,
-) -> Dict[str, Dict[str, float]]:
+    days_per_week: int = 7,
+) -> Dict[str, Any]:
     """
-    Computes how many hours to allocate per topic based on weightage.
-    Applies a 1.3x boost to weak subjects.
-    Returns: {subject: {topic: allocated_hours}}
-    Raises ValueError if exam date already passed or timeline is unrealistic.
+    Computes hour allocation per topic based on weightage priority.
+    - Excludes topics marked 'already done'.
+    - Calculates available study days based on days_per_week available.
+    - Conducts a feasibility check: fits highest-weightage topics within available hours.
+    - Returns: {"budget": {subj: {topic: hours}}, "excluded_topics": [...], "warning": str}
     """
     if days_remaining <= 0:
-        raise ValueError(
-            "Exam date has already passed or is today. Cannot generate a study plan."
-        )
+        raise ValueError("Exam date must be in the future.")
 
-    total_available_hours = daily_hours * days_remaining
+    # 1. Available time budget
+    effective_days_per_week = max(1, min(7, days_per_week))
+    actual_study_days = max(1, round(days_remaining * (effective_days_per_week / 7.0)))
+    total_available_hours = daily_hours * actual_study_days
 
-    # --- Step 1: Group topics by subject, sum weightage per subject ---
-    subject_weight: Dict[str, float] = {}
-    topic_weights: Dict[str, Dict[str, float]] = {}  # {subject: {topic: weight}}
+    # 2. Exclude topics marked "already done"
+    done_set = set()
+    for t in (topics_already_done or []):
+        t_clean = t.strip()
+        done_set.add(t_clean)
+        done_set.add(t_clean.split('\n')[0].strip())
 
+    remaining_syllabus = []
     for item in syllabus_topics:
+        t_full = item["topic"].strip()
+        t_first = t_full.split('\n')[0].strip()
+        if t_full not in done_set and t_first not in done_set:
+            remaining_syllabus.append(item)
+
+    if not remaining_syllabus:
+        raise ValueError("All syllabus topics are marked as done! No remaining topics to plan.")
+
+    # 3. Group by subject & sort by weightage (highest weightage first)
+    by_subject: Dict[str, List[Dict]] = {}
+    for item in remaining_syllabus:
+        subj = item["subject"]
+        if subj not in by_subject:
+            by_subject[subj] = []
+        by_subject[subj].append(item)
+
+    for subj in by_subject:
+        by_subject[subj].sort(key=lambda x: float(x.get("weightage", 1.0)), reverse=True)
+
+    # 4. Interleave topics across subjects for diversity (Physics, Chemistry, Maths)
+    interleaved = []
+    subjs = list(by_subject.keys())
+    indices = {s: 0 for s in subjs}
+
+    while any(indices[s] < len(by_subject[s]) for s in subjs):
+        for s in subjs:
+            if indices[s] < len(by_subject[s]):
+                interleaved.append(by_subject[s][indices[s]])
+                indices[s] += 1
+
+    # 5. Allocate hours to topics within total_available_hours budget
+    hour_budget: Dict[str, Dict[str, float]] = {s: {} for s in subjs}
+    excluded_topics: List[Dict[str, str]] = []
+    remaining_hours = total_available_hours
+
+    for item in interleaved:
         subj = item["subject"]
         topic = item["topic"]
         weight = float(item.get("weightage", 1.0))
 
-        subject_weight[subj] = subject_weight.get(subj, 0.0) + weight
-        if subj not in topic_weights:
-            topic_weights[subj] = {}
-        topic_weights[subj][topic] = weight
+        # Base hours needed per topic (1.5h to 4h based on weightage share)
+        req_hours = round(max(1.5, min(4.0, (weight / 0.03) * 2.5)) * 2) / 2
+        if subj in weak_subjects:
+            req_hours = round((req_hours * 1.25) * 2) / 2
 
-    if not subject_weight:
-        raise ValueError("No syllabus topics found to generate a study plan.")
+        if remaining_hours >= req_hours:
+            hour_budget[subj][topic] = req_hours
+            remaining_hours -= req_hours
+        else:
+            excluded_topics.append({
+                "subject": subj,
+                "topic": topic,
+                "reason": f"Skipped due to limited time budget ({total_available_hours:.1f} total hours available)"
+            })
 
-    # --- Step 2: Apply weak-subject boost ---
-    adjusted_weight: Dict[str, float] = {
-        subj: w * (1.3 if subj in weak_subjects else 1.0)
-        for subj, w in subject_weight.items()
-    }
+    # Clean up empty subjects
+    hour_budget = {s: t_dict for s, t_dict in hour_budget.items() if t_dict}
 
-    # --- Step 3: Normalize subject shares ---
-    total_adjusted = sum(adjusted_weight.values())
-    subject_share: Dict[str, float] = {
-        subj: w / total_adjusted for subj, w in adjusted_weight.items()
-    }
-
-    # --- Step 4: Allocate hours per subject ---
-    subject_hour_budget: Dict[str, float] = {
-        subj: share * total_available_hours
-        for subj, share in subject_share.items()
-    }
-
-    # --- Step 5: Distribute within each subject across topics (Prioritized) ---
-    hour_budget: Dict[str, Dict[str, float]] = {}
-    min_hours_per_topic = 1.0  # Minimum time to meaningfully cover a topic
-    unrealistic = False
-
-    for subj, topic_map in topic_weights.items():
-        # Sort topics by weightage (highest first)
-        sorted_topics = sorted(topic_map.items(), key=lambda item: item[1], reverse=True)
-        
-        subj_total_weight = sum(topic_map.values())
-        subj_hours = subject_hour_budget[subj]
-        topic_allocation: Dict[str, float] = {}
-
-        for topic, w in sorted_topics:
-            allocated = (w / subj_total_weight) * subject_hour_budget[subj]
-            allocated = round(allocated * 2) / 2
-            
-            if allocated < min_hours_per_topic:
-                allocated = min_hours_per_topic
-                
-            if subj_hours >= allocated:
-                topic_allocation[topic] = allocated
-                subj_hours -= allocated
-            else:
-                # We ran out of budget for this subject! Skip the remaining lower-weightage topics.
-                unrealistic = True
-                break
-
-        hour_budget[subj] = topic_allocation
-
-    result = {"budget": hour_budget, "warning": None}
-    if unrealistic:
-        result["warning"] = (
-            "Due to limited time, lower weightage topics were skipped to prioritize high-yield areas. "
-            "Consider increasing daily study hours to cover the full syllabus."
+    warning_msg = None
+    if excluded_topics:
+        warning_msg = (
+            f"{len(excluded_topics)} lower-priority topics were skipped due to limited time budget. "
+            "Consider increasing daily study hours or days per week to cover the full syllabus."
         )
 
-    return result
+    return {
+        "budget": hour_budget,
+        "excluded_topics": excluded_topics,
+        "warning": warning_msg
+    }
 
 
 # ============================================================
@@ -121,16 +131,22 @@ def build_llm_sequencing_prompt(
     days_remaining: int,
     daily_available_hours: float,
 ) -> str:
-    """Formats the fixed hour budget into the sequencing prompt for OpenAI."""
-    # Flatten budget into a list for LLM consumption
+    """Formats the fixed hour budget into the sequencing prompt for OpenAI, interleaving topics across subjects."""
+    by_subj = {subj: list(topics.items()) for subj, topics in hour_budget_dict.items()}
+    subjs = list(by_subj.keys())
+    indices = {s: 0 for s in subjs}
+    
     budget_list = []
-    for subject, topics in hour_budget_dict.items():
-        for topic, hours in topics.items():
-            budget_list.append({
-                "subject": subject,
-                "topic": topic,
-                "hours": hours
-            })
+    while any(indices[s] < len(by_subj[s]) for s in subjs):
+        for s in subjs:
+            if indices[s] < len(by_subj[s]):
+                topic, hours = by_subj[s][indices[s]]
+                budget_list.append({
+                    "subject": s,
+                    "topic": topic,
+                    "hours": hours
+                })
+                indices[s] += 1
 
     return STUDY_PLAN_SEQUENCING_PROMPT.format(
         daily_available_hours=daily_available_hours,

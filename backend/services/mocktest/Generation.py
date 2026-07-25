@@ -108,12 +108,10 @@ else:
 #         raise RuntimeError(f"Failed to read or process the Excel file at {excel_path}: {e}")
 
 def validate_topic_capacity(plan, topics_dict: dict, questions_per_chunk: int):
-    """Validates if there are enough topics for the requested questions."""
+    """Validates topic presence (round-robin assignment handles any question count)."""
     total_topics_count = sum(len(subj_topics) for subj_topics in topics_dict.values())
-    total_chunks_requested = sum(num // questions_per_chunk for num in plan.values())
-    if total_chunks_requested > total_topics_count // questions_per_chunk:
-        error_msg = f"Not enough unique topics to generate the requested number of questions. \nTopics available: {total_topics_count}, Questions requested: {sum(plan.values())}"
-        raise ValueError(error_msg)
+    if total_topics_count == 0:
+        raise ValueError("No topics selected or available for question generation.")
 
 def build_prompt_from_template(topics_list, template_key, num_of_questions, EXAM):
     """Builds a GPT prompt from a template with the given topics."""
@@ -123,13 +121,14 @@ def build_prompt_from_template(topics_list, template_key, num_of_questions, EXAM
     return template.format(topics=topics_str, answer_key=randomized_answer_key, num=num_of_questions, exam=EXAM)
 
 def generate_all_prompts(plan, topics: dict, exam, questions_per_chunk: int):
-    """Generates a list of all prompts to be sent to the GPT API."""
+    """Generates a list of all prompts to be sent to the GPT API using round-robin topic distribution."""
     prompts = []
     
     # 1. Shuffle topics within each subject
     shuffled_by_subj = {}
     for subj, subj_topics in topics.items():
-        shuffled_by_subj[subj] = random.sample(subj_topics, len(subj_topics))
+        if subj_topics:
+            shuffled_by_subj[subj] = random.sample(subj_topics, len(subj_topics))
         
     # 2. Interleave them perfectly for maximum diversity
     shuffled_topics = []
@@ -140,16 +139,27 @@ def generate_all_prompts(plan, topics: dict, exam, questions_per_chunk: int):
             if shuffled_by_subj[subj]:
                 shuffled_topics.append(shuffled_by_subj[subj].pop(0))
                 
+    if not shuffled_topics:
+        raise ValueError("No topics available for question generation.")
+
     topic_index = 0
+    num_topics = len(shuffled_topics)
     
     for qtype, count in plan.items():
-        if topic_index + ((count // questions_per_chunk) * questions_per_chunk) > len(shuffled_topics):
-            raise ValueError("Topic index out of bounds. This indicates a logic error in topic validation.")
-        for _ in range(count // questions_per_chunk):
-            chunk = shuffled_topics[topic_index : topic_index + questions_per_chunk]
-            topic_index += questions_per_chunk
+        if count <= 0:
+            continue
+        num_chunks = count // questions_per_chunk
+        if num_chunks == 0 and count > 0:
+            num_chunks = 1
+            
+        for _ in range(num_chunks):
+            chunk = []
+            for _ in range(questions_per_chunk):
+                chunk.append(shuffled_topics[topic_index % num_topics])
+                topic_index += 1
             prompt = build_prompt_from_template(chunk, qtype, questions_per_chunk, exam)
             prompts.append((qtype, prompt))
+            
     return prompts
 
 # === FILE OPERATIONS ===
@@ -198,9 +208,9 @@ def save_raw_response(text, folder=RAW_RESPONSES_DIR):
     except Exception as e:
         print(f"❌ Failed to save raw response PDF. Details: {e}")
 
-def log_generation_to_db(system_prompt: str, user_prompt: str, response_content: str, exam_name: str, model_name: str, testing: bool):
+def log_generation_to_db(system_prompt: str, user_prompt: str, response_content: str, exam_name: str, model_name: str):
     """Logs a successful prompt/response pair to MongoDB if enabled."""
-    if not testing and mongo_client and SAVE_GENERATIONS_TO_DB and response_content:
+    if mongo_client and SAVE_GENERATIONS_TO_DB and response_content:
         try:
             finetune_collection.insert_one({
                 "system": system_prompt,
@@ -219,24 +229,9 @@ def log_generation_to_db(system_prompt: str, user_prompt: str, response_content:
         print("  -> 🟡 Skipping MongoDB log (master flag is OFF).")
 
 # === GPT HANDLING ===
-def call_gpt(prompt, testing, exam_name, chunks, retries=3):
+def call_gpt(prompt, exam_name, chunks, retries=3):
     """Calls the OpenAI API with a given prompt, with retries."""
     system_prompt = f"You are a {exam_name} paper setter. You must output exclusively in valid JSON format."
-    
-    if testing:
-        time.sleep(1)
-        mock_response = {
-            "questions": [
-                {
-                    "question": f"Q{i+1}. This is a sample test question for type {prompt[:3]}.",
-                    "options": ["A", "B", "C", "D"],
-                    "correct_answer": 1,
-                    "solution": "This is a test explanation."
-                }
-                for i in range(chunks)
-            ]
-        }
-        return json.dumps(mock_response), system_prompt
     
     api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY") or API_KEY
     if not api_key:
@@ -267,7 +262,7 @@ def call_gpt(prompt, testing, exam_name, chunks, retries=3):
 
 
 # === CORE EXECUTION LOGIC ===
-def handle_generation(prompts, TESTING, exam_name, questions_per_chunk: int):
+def handle_generation(prompts, exam_name, questions_per_chunk: int):
     """Handles the question generation loop, calling GPT for each prompt."""
     all_questions = []
     skipped_chunks = []
@@ -282,15 +277,14 @@ def handle_generation(prompts, TESTING, exam_name, questions_per_chunk: int):
         for attempt in range(max_retries_per_chunk):
             try:
                 print(f"  -> Attempt {attempt + 1} for {qtype}...")
-                response, system_prompt_used = call_gpt(prompt, TESTING, exam_name, questions_per_chunk)
+                response, system_prompt_used = call_gpt(prompt, exam_name, questions_per_chunk)
                 
                 if not response:
                     print(f"  -> ⚠️ call_gpt returned empty response for {qtype}.")
                     last_failed_chunk = [{"error": f"--- GPT CALL RETURNED EMPTY RESPONSE --- (Type: {qtype})"}]
                     continue
                 
-                if not TESTING:
-                    save_raw_response(response)
+                save_raw_response(response)
 
                 # Parse questions from JSON
                 try:
@@ -306,14 +300,13 @@ def handle_generation(prompts, TESTING, exam_name, questions_per_chunk: int):
                 if len(questions) >= questions_per_chunk:
                     print(f"  ✅ Success! Got {len(questions)} questions.")
                     generated_chunk = questions[:questions_per_chunk]
-                    if not TESTING and system_prompt_used:
+                    if system_prompt_used:
                          log_generation_to_db(
                              system_prompt=system_prompt_used,
                              user_prompt=prompt,
                              response_content=response,
                              exam_name=exam_name,
-                             model_name=MODEL,
-                             testing=TESTING
+                             model_name=MODEL
                          )
                     break
                 else:
@@ -355,7 +348,7 @@ def format_questions_for_pdf(questions):
     return "\n\n".join(text_parts)
 
 # === MAIN ENTRY POINT FOR BACKEND ===
-def run_generation_task(plan: dict, testing_mode: bool, exam_name: str, output_format: str, questions_per_chunk: int, topics: dict):
+def run_generation_task(plan: dict, exam_name: str, output_format: str, questions_per_chunk: int, topics: dict):
     """Main function to be called by the FastAPI """
     try:
         print(f"Starting generation for {exam_name} with plan: {plan}")
@@ -371,7 +364,7 @@ def run_generation_task(plan: dict, testing_mode: bool, exam_name: str, output_f
         
         prompts = generate_all_prompts(plan, topics, exam_name, questions_per_chunk)
         
-        generated_questions, skipped_chunks = handle_generation(prompts, testing_mode, exam_name, questions_per_chunk)
+        generated_questions, skipped_chunks = handle_generation(prompts, exam_name, questions_per_chunk)
         if not generated_questions and not skipped_chunks:
             raise RuntimeError("No questions were successfully generated. Check logs for API errors or response format issues.")
         

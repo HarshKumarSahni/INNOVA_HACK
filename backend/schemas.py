@@ -85,8 +85,17 @@ class OnboardingUpdate(BaseModel):
 
 # --- STUDY PLANNER SCHEMAS ---
 
+class ExcludedTopicOut(BaseModel):
+    subject: str
+    topic: str
+    reason: str
+
 class StudyPlanCreateRequest(BaseModel):
+    exam_name: str = "JEE"
+    topics_already_done: Optional[List[str]] = []
+    exam_date: date
     daily_available_hours: float
+    days_per_week_available: int = 7
     weak_subjects: Optional[List[str]] = []
 
 class DailyTaskOut(BaseModel):
@@ -109,6 +118,7 @@ class StudyPlanOut(BaseModel):
     daily_available_hours: float
     status: str
     tasks: List[DailyTaskOut] = []
+    excluded_topics: Optional[List[ExcludedTopicOut]] = []
 
     class Config:
         from_attributes = True

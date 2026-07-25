@@ -74,6 +74,7 @@ class StudyPlan(Base):
     target_exam_date = Column(Date, nullable=False)
     daily_available_hours = Column(Float, nullable=False)
     status = Column(String, default="active", nullable=False)  # active, completed, archived
+    excluded_topics = Column(JSON, nullable=True, default=[])
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

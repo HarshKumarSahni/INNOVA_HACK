@@ -141,6 +141,7 @@ def create_study_plan(
     exam_name: str,
     target_exam_date: date,
     daily_available_hours: float,
+    excluded_topics: Optional[List[dict]] = None,
 ) -> StudyPlan:
     """Creates a new active study plan for a user."""
     plan = StudyPlan(
@@ -149,6 +150,7 @@ def create_study_plan(
         target_exam_date=target_exam_date,
         daily_available_hours=daily_available_hours,
         status="active",
+        excluded_topics=excluded_topics or [],
     )
     db.add(plan)
     db.commit()

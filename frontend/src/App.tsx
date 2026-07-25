@@ -63,10 +63,8 @@ const App: React.FC = () => {
             hasCompletedOnboarding: userData.has_completed_onboarding
           }));
           
-          // Determine if we need to show onboarding
-          if (!userData.has_completed_onboarding) {
-            setShowOnboarding(true);
-          }
+          // Direct login to dashboard (Onboarding bypassed)
+          setShowOnboarding(false);
         } else {
           // Token is invalid, clear everything
           localStorage.removeItem('access_token');
@@ -105,10 +103,8 @@ const App: React.FC = () => {
       hasCompletedOnboarding: user.hasCompletedOnboarding
     }));
     
-    // Check if user needs onboarding
-    if (!userData.hasCompletedOnboarding) {
-      setShowOnboarding(true);
-    }
+    // Direct login to dashboard without onboarding step
+    setShowOnboarding(false);
   };
 
   // Handle successful signup
@@ -121,24 +117,15 @@ const App: React.FC = () => {
   // Handle onboarding completion
   const handleOnboardingComplete = async (onboardingData: OnboardingData) => {
     try {
-      // The onboarding data is already saved to backend by OnboardingPage component
-      // Just update the local state and storage
-      
-      // Store onboarding data locally as well
       localStorage.setItem('onboarding_data', JSON.stringify({
         ...onboardingData,
         completedAt: new Date().toISOString()
       }));
-
-      // Mark onboarding as complete
       setShowOnboarding(false);
       
-      // Update user state
       if (user) {
         const updatedUser = { ...user, hasCompletedOnboarding: true };
         setUser(updatedUser);
-        
-        // Update localStorage
         localStorage.setItem('user_data', JSON.stringify({
           id: updatedUser.id,
           email: updatedUser.email,
@@ -149,9 +136,7 @@ const App: React.FC = () => {
       console.log('Onboarding completed with data:', onboardingData);
     } catch (error) {
       console.error('Error completing onboarding:', error);
-      // Still proceed to dashboard since the backend already saved the data
       setShowOnboarding(false);
-      
       if (user) {
         setUser({ ...user, hasCompletedOnboarding: true });
       }
@@ -170,7 +155,6 @@ const App: React.FC = () => {
 
   // Handle going back from onboarding
   const handleOnboardingBack = () => {
-    // Skip onboarding for now - user can complete it later
     setShowOnboarding(false);
   };
 
