@@ -1,0 +1,7 @@
+# backend/.dockerignore
+venv/
+__pycache__/
+.env
+.vscode/
+data/generated_files/*
+data/raw_responses/*

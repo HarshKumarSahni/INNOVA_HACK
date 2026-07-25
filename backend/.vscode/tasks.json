@@ -1,0 +1,23 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Switch to Akshat",
+      "type": "shell",
+      "command": "git config user.name 'Akshat Lakhera' ; git config user.email 'akshat23061@iiitd.ac.in'",
+      "problemMatcher": []
+    },
+    {
+      "label": "Switch to Prags",
+      "type": "shell",
+      "command": "git config user.name 'Pragya Singh' ; git config user.email 'pragya23379@iiitd.ac.in'",
+      "problemMatcher": []
+    },
+    {
+      "label": "Switch back to Me",
+      "type": "shell",
+      "command": "git config user.name 'Aditya Verma' ; git config user.email 'aditverma1407@gmail.com'",
+      "problemMatcher": []
+    }
+  ]
+}

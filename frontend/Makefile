@@ -1,0 +1,2 @@
+front:
+	npm run dev

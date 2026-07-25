@@ -1,0 +1,17 @@
+# docker-compose.yml
+services:
+  backend:
+    build: ./backend
+    ports:
+      - "10000:10000"  # Changed from 8000:8000 to match your Dockerfile EXPOSE 10000
+    env_file:
+      - ./backend/.env          # Match your root-level .env location
+    volumes:
+      - ./backend/data:/app/data
+    restart: always
+
+  frontend:
+    build: ./frontend
+    ports:
+      - "5173:80"     # Keeps Nginx on 5173
+    restart: always
