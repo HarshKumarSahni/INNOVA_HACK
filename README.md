@@ -178,10 +178,7 @@ INNOVA_HACK/
 1. Import repository into Vercel.
 2. Set **Root Directory** to `frontend`.
 3. Framework preset: `Vite`.
-4. Set Environment Variable: `VITE_API_BASE_URL=https://your-backend-service.onrender.com`.
+4. Set Environment Variable: `VITE_API_BASE_URL=https://innova-hack-3u50.onrender.com`.
 
 ---
 
-## 📝 License
-
-Distributed under the **MIT License**.
