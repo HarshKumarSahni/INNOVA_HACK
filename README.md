@@ -8,12 +8,35 @@ The platform leverages **Large Language Models (LLMs)** to dynamically parse raw
 
 ![Dashboard](assets/image.png)
 
+🎬 **Application Demo Video:** [Watch Video on Google Drive](https://drive.google.com/drive/folders/1B2Wr9QyxyT2U75F2fcvXjoNOYSOnkJmv?usp=sharing)
+
 ---
 
-## 🌐 Live Deployment
+## 🌐 Live Deployment & Demo Credentials
 
-* **Frontend:** [https://ace-track.vercel.app/](https://innova-hack-fawn.vercel.app/)
-* **Backend API:** [https://acetrack-backend.onrender.com/](https://innova-hack-3u50.onrender.com)
+* **Frontend App:** [https://innova-hack-fawn.vercel.app/](https://innova-hack-fawn.vercel.app/)
+* **Backend API Docs:** [https://innova-hack-3u50.onrender.com/docs](https://innova-hack-3u50.onrender.com/docs)
+
+---
+
+## ⚡ Quick Evaluation & How-to-Run Steps
+
+### 🔑 Option 1: Instant Evaluation via Pre-Configured Demo Account (Recommended)
+For fast evaluation without manually creating data, use the default demo credentials:
+* **Email:** `demo@gmail.com`
+* **Password:** `AceTrack`
+
+> **Note:** The demo account comes pre-loaded with onboarded exam details, active study schedules, and uploaded syllabus data so you can immediately test the **Mock Test Generator**, **Interactive Test Evaluation**, and **Adaptive Study Planner**.
+
+---
+
+### 🆕 Option 2: New Account Setup Flow
+If you wish to test creating a brand new account from scratch:
+1. **Sign Up:** Click **Sign Up** on the app landing page to create a new user account.
+2. **Log In:** Log in with your new credentials.
+3. **Onboarding:** Complete the step-by-step onboarding wizard (target exam, exam date, daily available study hours, and weak subjects).
+4. **Upload Syllabus:** Go to the **Syllabus** tab and upload a syllabus `.xlsx` or `.xls` file.
+   * *Sample syllabus Excel files are provided in the backend directory:* [`backend/data/Syllabus.xlsx`](backend/data/Syllabus.xlsx) or [`backend/data/UGCSyllabus.xlsx`](backend/data/UGCSyllabus.xlsx).
 
 ---
 
@@ -90,6 +113,9 @@ flowchart TD
 ```text
 INNOVA_HACK/
 ├── backend/                    # FastAPI backend application
+│   ├── data/                   # Sample syllabus files & generated exports
+│   │   ├── Syllabus.xlsx
+│   │   └── UGCSyllabus.xlsx
 │   ├── services/
 │   │   ├── mocktest/           # Mock test generation & prompt templates
 │   │   │   ├── Generation.py
@@ -182,3 +208,6 @@ INNOVA_HACK/
 
 ---
 
+## 📝 License
+
+Distributed under the **MIT License**.
