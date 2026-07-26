@@ -1,4 +1,4 @@
-# AceTrack 🚀
+# AceTrack 🚀 (by Pragya Singh & Harsh Kumar Sahni)
 
 **AI-Powered Educational Productivity Platform, Mock Test Generator & Adaptive Study Planner**
 
