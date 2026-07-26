@@ -12,8 +12,8 @@ The platform leverages **Large Language Models (LLMs)** to dynamically parse raw
 
 ## 🌐 Live Deployment
 
-* **Frontend:** [https://ace-track.vercel.app/](https://ace-track.vercel.app/)
-* **Backend API:** [https://acetrack-backend.onrender.com/](https://acetrack-backend.onrender.com/)
+* **Frontend:** [https://ace-track.vercel.app/](https://innova-hack-fawn.vercel.app/)
+* **Backend API:** [https://acetrack-backend.onrender.com/](https://innova-hack-3u50.onrender.com)
 
 ---
 
