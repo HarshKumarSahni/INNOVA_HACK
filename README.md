@@ -1,4 +1,4 @@
-# AceTrack 🚀 (by Pragya Singh & Harsh Kumar Sahni)
+# AceTrack 🚀
 
 **AI-Powered Educational Productivity Platform, Mock Test Generator & Adaptive Study Planner**
 
@@ -206,3 +206,4 @@ INNOVA_HACK/
 3. Framework preset: `Vite`.
 4. Set Environment Variable: `VITE_API_BASE_URL=https://innova-hack-3u50.onrender.com`.
 
+# By Pragya Singh & Harsh Kumar Sahni
