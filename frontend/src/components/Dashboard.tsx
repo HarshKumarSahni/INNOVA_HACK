@@ -674,9 +674,6 @@ const Dashboard: React.FC<DashboardProps> = ({ user, onLogout }) => {
                   <button onClick={() => setActiveTab('studyPlan')} className={`flex items-center gap-2 px-3 py-2 rounded-lg font-medium ${activeTab === 'studyPlan' ? 'bg-purple-100 text-purple-700' : 'text-gray-600 hover:bg-gray-100'}`}>
                     <Calendar className="w-4 h-4" /> Study Plan
                   </button>
-                  <a href="#" className="flex items-center gap-2 px-3 py-2 rounded-lg text-gray-600 hover:bg-gray-100">
-                    <BookOpen className="w-4 h-4" /> PYQs
-                  </a>
                 </nav>
               )}
 
